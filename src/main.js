@@ -19,6 +19,7 @@ const el = {
   countryFilter: $('country-filter'),
   categoryFilter: $('category-filter'),
   clearFilters: $('clear-filters'),
+  favFilter: $('fav-filter'),
   resultCount: $('result-count'),
   headerStats: $('header-stats'),
   // modal
@@ -37,11 +38,17 @@ const el = {
   playerErrorText: $('player-error-text'),
   retryStream: $('retry-stream'),
   streamList: $('stream-list'),
+  favModal: $('fav-modal'),
+  emptyText: document.querySelector('#empty p'),
 };
+
+const FAV_KEY = 'livewave:favorites';
 
 const state = {
   data: null,
   channelById: new Map(),
+  favorites: loadFavorites(),
+  favOnly: false,
   query: '',
   country: '',
   category: '',
@@ -51,6 +58,43 @@ const state = {
   autoTries: 0,
   player: null,
 };
+
+/* -------------------------------- favorites -------------------------------- */
+
+function loadFavorites() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistFavorites() {
+  try {
+    localStorage.setItem(FAV_KEY, JSON.stringify([...state.favorites]));
+  } catch {
+    /* storage unavailable (private mode / quota) — favorites just won't persist */
+  }
+}
+
+function toggleFav(id) {
+  if (state.favorites.has(id)) state.favorites.delete(id);
+  else state.favorites.add(id);
+  persistFavorites();
+  render();
+}
+
+/** Keep the toolbar + modal favorite buttons in sync with the saved list. */
+function updateFavUI() {
+  const n = state.favorites.size;
+  el.favFilter.textContent = `⭐ Favorites${n ? ` (${n})` : ''}`;
+  el.favFilter.classList.toggle('active', state.favOnly);
+  if (state.current) {
+    const fav = state.favorites.has(state.current.id);
+    el.favModal.textContent = fav ? '★ Saved' : '☆ Favorite';
+    el.favModal.classList.toggle('on', fav);
+  }
+}
 
 /* ---------------------------------- boot ---------------------------------- */
 
@@ -145,23 +189,30 @@ function applyFilters() {
 /* ---------------------------------- render --------------------------------- */
 
 function filtered() {
-  return filterChannels(state.data.channels, {
+  let list = filterChannels(state.data.channels, {
     query: state.query,
     country: state.country,
     category: state.category,
     countryOf: state.data.countryOf,
   });
+  if (state.favOnly) list = list.filter((ch) => state.favorites.has(ch.id));
+  return list;
 }
 
 function render() {
   const list = filtered();
-  const anyFilter = state.query || state.country || state.category;
+  const anyFilter = state.query || state.country || state.category || state.favOnly;
 
   el.clearFilters.hidden = !anyFilter;
   el.resultCount.textContent = list.length
     ? `${Math.min(state.visible, list.length).toLocaleString()} of ${list.length.toLocaleString()} channels`
     : '';
   el.empty.hidden = list.length > 0;
+  if (list.length === 0) {
+    el.emptyText.textContent = state.favOnly && state.favorites.size === 0
+      ? 'No favorites yet — tap the ☆ on any channel to save it.'
+      : '😕 No channels match your filters.';
+  }
 
   el.grid.textContent = '';
   const slice = list.slice(0, state.visible);
@@ -169,6 +220,7 @@ function render() {
 
   el.loadMore.hidden = state.visible >= list.length;
   el.loadMore.textContent = `Show more (${(list.length - state.visible).toLocaleString()} remaining)`;
+  updateFavUI();
 }
 
 function card(ch) {
@@ -195,6 +247,26 @@ function card(ch) {
   }
   logo.appendChild(fallback);
   fallback.hidden = Boolean(ch.logo);
+
+  const isFav = state.favorites.has(ch.id);
+  const fav = document.createElement('span');
+  fav.className = 'fav-btn' + (isFav ? ' on' : '');
+  fav.setAttribute('role', 'button');
+  fav.tabIndex = 0;
+  fav.setAttribute('aria-label', isFav ? `Remove ${ch.name} from favorites` : `Add ${ch.name} to favorites`);
+  fav.textContent = isFav ? '★' : '☆';
+  fav.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't open the player
+    toggleFav(ch.id);
+  });
+  fav.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFav(ch.id);
+    }
+  });
+  logo.appendChild(fav);
 
   const name = document.createElement('div');
   name.className = 'card-name';
@@ -259,6 +331,7 @@ function openModal(ch) {
   renderStreamList();
   hideError();
   showOverlay('Starting stream…');
+  updateFavUI();
   playStream();
 
   el.modal.hidden = false;
@@ -377,7 +450,16 @@ el.clearFilters.addEventListener('click', () => {
   el.search.value = '';
   el.countryFilter.value = '';
   el.categoryFilter.value = '';
+  state.favOnly = false;
   applyFilters();
+});
+el.favFilter.addEventListener('click', () => {
+  state.favOnly = !state.favOnly;
+  state.visible = PAGE;
+  render();
+});
+el.favModal.addEventListener('click', () => {
+  if (state.current) toggleFav(state.current.id);
 });
 el.loadMore.addEventListener('click', () => {
   state.visible += PAGE;

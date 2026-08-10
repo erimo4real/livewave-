@@ -302,6 +302,48 @@ a {
   user-select: none;
 }
 
+.fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  background: rgb(0 0 0 / 0.55);
+  border: none;
+  border-radius: 8px;
+  color: #8a93a3;
+  font-size: 17px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color 0.15s, transform 0.15s;
+}
+
+.fav-btn:hover {
+  color: #ffd54f;
+  transform: scale(1.15);
+}
+
+.fav-btn.on {
+  color: #ffd54f;
+}
+
+.fav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn.active {
+  border-color: var(--accent);
+  background: rgb(229 35 58 / 0.16);
+  color: #fff;
+  font-weight: 600;
+}
+
+#fav-modal.on {
+  border-color: #ffd54f;
+  color: #ffd54f;
+}
+
 .card-name {
   font-size: 14px;
   font-weight: 600;
