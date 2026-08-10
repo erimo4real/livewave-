@@ -1,0 +1,51 @@
+# LiveWave — Free Live TV
+
+A no-backend web player for free live TV channels, powered entirely by the open
+[iptv-org](https://github.com/iptv-org/iptv) playlist and [API](https://github.com/iptv-org/api).
+No database, no signup, no server — just static files that talk to iptv-org.
+
+## How it works
+
+On load the app fetches three public datasets and joins them in the browser:
+
+| Data | Source | Used for |
+| --- | --- | --- |
+| Channel playlist | [`iptv-org.github.io/iptv/index.m3u`](https://iptv-org.github.io/iptv/index.m3u) | Channel name, logo, category, stream URL |
+| Channel metadata | [`iptv-org.github.io/api/channels.json`](https://iptv-org.github.io/api/channels.json) | Country per channel |
+| Countries | [`iptv-org.github.io/api/countries.json`](https://iptv-org.github.io/api/countries.json) | Country names + flag emoji |
+
+Streams are played with [hls.js](https://github.com/video-dev/hls.js). The playlist is
+rebuilt by iptv-org every day, so the channel list is always current — the app never
+stores or caches anything itself.
+
+## Running locally
+
+```bash
+npm install
+npm run dev      # start the dev server (http://localhost:5173)
+npm run build    # production build into dist/
+npm run preview  # preview the production build
+```
+
+## Deploying
+
+The app is 100% static. Build it and host the `dist/` folder anywhere — GitHub Pages,
+Netlify, Vercel, Cloudflare Pages, or a plain web server. Nothing else is required.
+
+## Known limitations
+
+These are inherent to free IPTV streams, not the app:
+
+- **Some streams won't play in a browser.** Many public streams block cross-origin
+  requests (no CORS headers) or require a custom `User-Agent` / `Referer` header that
+  browsers can't set on media requests. Those links still work in desktop players like
+  **VLC** — use the *Copy URL* button and paste it into VLC (Media → Open Network Stream).
+- **Availability varies by region and over time.** Some channels are geo-blocked,
+  some go offline. When a stream fails, the app automatically tries the next stream
+  for that channel and offers manual retry.
+- The main playlist (`index.m3u`) intentionally excludes adult (NSFW) channels.
+
+## Credits
+
+All channel data and streams come from the community-maintained
+[iptv-org](https://github.com/iptv-org/iptv) project (CC-BY-SA).

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Watch thousands of free live TV channels online — no signup, no database. Powered by the iptv-org open playlist." />
+    <title>LiveWave — Free Live TV</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📺</text></svg>" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-icon">📺</span>
+        <div>
+          <h1>LiveWave</h1>
+          <p class="tagline">Free live TV — powered by <a href="https://github.com/iptv-org/iptv" target="_blank" rel="noopener">iptv-org</a></p>
+        </div>
+      </div>
+      <div class="header-stats" id="header-stats"></div>
+    </header>
+
+    <main>
+      <section class="toolbar">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input id="search" type="search" placeholder="Search channels… (e.g. CNN, BBC, ESPN)" autocomplete="off" />
+        </div>
+        <select id="country-filter" class="filter" title="Filter by country">
+          <option value="">All countries</option>
+        </select>
+        <select id="category-filter" class="filter" title="Filter by category">
+          <option value="">All categories</option>
+        </select>
+        <button id="clear-filters" class="btn ghost" hidden>Clear filters</button>
+        <span id="result-count" class="result-count"></span>
+      </section>
+
+      <section id="loading" class="loading">
+        <div class="spinner"></div>
+        <p id="loading-text">Loading channels… (first visit downloads ~13 MB, then it's cached by your browser)</p>
+      </section>
+
+      <section id="error" class="error" hidden>
+        <p id="error-text"></p>
+        <button id="retry" class="btn primary">Try again</button>
+      </section>
+
+      <section id="grid" class="grid" hidden></section>
+
+      <section id="empty" class="empty" hidden>
+        <p>😕 No channels match your filters.</p>
+      </section>
+
+      <button id="load-more" class="btn load-more" hidden>Show more channels</button>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Channel data &amp; streams come from the open
+        <a href="https://github.com/iptv-org/iptv" target="_blank" rel="noopener">iptv-org</a> playlist
+        (<a href="https://github.com/iptv-org/api" target="_blank" rel="noopener">API</a>). Streams are public internet
+        links and availability varies by region. If a channel doesn't play, try another stream or open the link in VLC.
+      </p>
+    </footer>
+
+    <div id="modal" class="modal-backdrop" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Channel player">
+        <div class="player-shell">
+          <div class="player-topbar">
+            <div class="player-channel">
+              <img id="player-logo" alt="" />
+              <div>
+                <h2 id="player-name"></h2>
+                <p id="player-meta"></p>
+              </div>
+            </div>
+            <div class="player-actions">
+              <a id="open-stream" class="btn ghost" href="#" target="_blank" rel="noopener">Open stream ↗</a>
+              <button id="copy-url" class="btn ghost">Copy URL</button>
+              <button id="close-modal" class="btn icon" aria-label="Close player">✕</button>
+            </div>
+          </div>
+          <div class="video-wrap">
+            <video id="player" controls playsinline></video>
+            <div id="player-overlay" class="player-overlay" hidden>
+              <div class="spinner"></div>
+              <p id="player-overlay-text">Loading stream…</p>
+            </div>
+          </div>
+          <div id="player-error" class="player-error" hidden>
+            <p id="player-error-text"></p>
+            <div class="player-error-actions">
+              <button id="retry-stream" class="btn primary">Try next stream</button>
+              <button id="copy-url-2" class="btn ghost">Copy URL</button>
+            </div>
+          </div>
+          <div id="stream-list" class="stream-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
