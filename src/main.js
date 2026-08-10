@@ -1,4 +1,5 @@
 import { fetchPlaylist, fetchMeta, buildChannels, filterChannels } from './data.js';
+import { fetchCountryEpg, getProgrammes } from './epg.js';
 import { StreamPlayer } from './player.js';
 import './style.css';
 
@@ -40,6 +41,7 @@ const el = {
   retryStream: $('retry-stream'),
   streamList: $('stream-list'),
   favModal: $('fav-modal'),
+  playerProgramme: $('player-programme'),
   emptyText: document.querySelector('#empty p'),
 };
 
@@ -135,6 +137,10 @@ async function boot() {
     console.warn('country metadata failed:', err);
     el.headerStats.textContent = `${state.data.channels.length.toLocaleString()} channels · country filter unavailable`;
   }
+
+  // Background: load guides for the biggest countries so cards can show
+  // what's on now. Channels without a known country are skipped.
+  prefetchEpg();
 }
 
 function showLoadError(err) {
@@ -288,7 +294,16 @@ function card(ch) {
   cat.textContent = ch.category === 'Undefined' ? 'Other' : ch.category;
   meta.appendChild(cat);
 
-  btn.append(logo, name, meta);
+  btn.append(logo, name);
+  const prog = ch.country ? getProgrammes(ch.country, ch.id) : null;
+  if (prog?.now) {
+    const now = document.createElement('div');
+    now.className = 'card-now';
+    now.textContent = `Now: ${prog.now.title}`;
+    now.title = `On now: ${prog.now.title}\nNext: ${prog.next ? prog.next.title : '—'}`;
+    btn.appendChild(now);
+  }
+  btn.appendChild(meta);
   btn.addEventListener('click', () => openModal(ch));
   return btn;
 }
@@ -328,6 +343,22 @@ function openModal(ch) {
   ]
     .filter(Boolean)
     .join(' · ');
+
+  // EPG: show what's on now/next; fetch the country's guide on demand.
+  el.playerProgramme.textContent = '';
+  if (ch.country) {
+    const cc = ch.country;
+    const prog = getProgrammes(cc, ch.id);
+    if (prog) {
+      setProgrammeText(prog);
+    } else {
+      fetchCountryEpg(cc)
+        .then(() => {
+          if (state.current?.id === ch.id) setProgrammeText(getProgrammes(cc, ch.id));
+        })
+        .catch(() => {});
+    }
+  }
 
   renderStreamList();
   hideError();
@@ -437,6 +468,46 @@ function hideOverlay() {
 
 function hideError() {
   el.playerError.hidden = true;
+}
+
+/* ----------------------------------- EPG ----------------------------------- */
+
+const EPG_PREFETCH_COUNT = 8;
+
+/** Prefetch guides for the countries with the most channels, in the background. */
+async function prefetchEpg() {
+  if (!state.data) return;
+  const counts = new Map();
+  for (const ch of state.data.channels) {
+    if (ch.country) counts.set(ch.country, (counts.get(ch.country) || 0) + 1);
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, EPG_PREFETCH_COUNT)
+    .map(([cc]) => cc);
+  for (const cc of top) {
+    try {
+      await fetchCountryEpg(cc);
+      render(); // reveal the new "Now:" lines
+    } catch {
+      /* provider has no guide for this country — skip */
+    }
+  }
+}
+
+/** Format the modal's now/next programme line. */
+function setProgrammeText(prog) {
+  const fmt = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (prog?.now && prog.next) {
+    el.playerProgramme.textContent =
+      `On now: ${prog.now.title} (until ${fmt(prog.now.stop)}) · Next: ${prog.next.title} at ${fmt(prog.next.start)}`;
+  } else if (prog?.now) {
+    el.playerProgramme.textContent = `On now: ${prog.now.title} (until ${fmt(prog.now.stop)})`;
+  } else if (prog?.next) {
+    el.playerProgramme.textContent = `Next: ${prog.next.title} at ${fmt(prog.next.start)}`;
+  } else {
+    el.playerProgramme.textContent = '';
+  }
 }
 
 /* ---------------------------------- events --------------------------------- */

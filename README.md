@@ -19,6 +19,11 @@ browser:
 Streams are played with [hls.js](https://github.com/video-dev/hls.js). The playlist is
 rebuilt by iptv-org every day, so the channel list is always current.
 
+**LiveWave shows what's on now**: an EPG guide (`api/epg.js`) trims iptv-epg.org's
+per-country XMLTV schedules down to the current + next programme per channel, cached at
+the edge. Cards show a *Now:* line for the biggest countries and the player shows the
+full on-now/next line for any channel with listings. Coverage varies by provider.
+
 **LiveWave is also a PWA**: on production builds a service worker (`public/sw.js`)
 caches the app shell and last-known channel data, so the site installs like an app
 (Chrome/Edge/Safari offer an *Install app* button) and loads fast or works offline.

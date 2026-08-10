@@ -1,0 +1,91 @@
+/**
+ * EPG (Electronic Program Guide) support.
+ *
+ * Schedule data comes from iptv-epg.org's per-country XMLTV files, which use
+ * the same channel ids as iptv-org (e.g. "CNN.us"). The browser always asks
+ * our own /api/epg?country=XX endpoint — a Vercel function that trims the
+ * (huge) XMLTV file down to a compact now/next summary and caches it at the
+ * edge. In local dev, vite.config.js proxies /api to the deployed app.
+ *
+ * The pure helpers here (xmltvTimeToEpoch, unescapeXml, selectNowNext) are
+ * shared with the api/epg.js proxy function — keep them free of browser APIs.
+ */
+
+const epgCache = new Map(); // cc -> { channels, fetchedAt }
+const inflight = new Map(); // cc -> Promise
+
+/** Parse an XMLTV timestamp "20260809100000 +0000" into epoch ms. */
+export function xmltvTimeToEpoch(s) {
+  const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?$/.exec(String(s).trim());
+  if (!m) return NaN;
+  let t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  if (m[7]) {
+    const sign = m[7][0] === '-' ? -1 : 1;
+    const mins = (+m[7].slice(1, 3) * 60 + +m[7].slice(3, 5)) * sign;
+    t -= mins * 60000;
+  }
+  return t;
+}
+
+/** Decode the entities XMLTV producers actually use. */
+export function unescapeXml(s) {
+  return String(s)
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * Pick the current + next programme per channel.
+ * @param {Array<{channel:string,start:number,stop:number,title:string}>} programmes
+ * @returns {Record<string,{now:{title,start,stop}|null,next:{title,start,stop}|null}>}
+ */
+export function selectNowNext(programmes) {
+  const now = Date.now();
+  const out = {};
+  for (const p of programmes) {
+    if (!isFinite(p.start) || !isFinite(p.stop) || !p.title) continue;
+    const entry = out[p.channel] || (out[p.channel] = { now: null, next: null, nextStart: Infinity });
+    if (p.start <= now && p.stop > now) {
+      if (!entry.now || p.start > entry.now.start) entry.now = { title: p.title, start: p.start, stop: p.stop };
+    } else if (p.start > now && p.start < entry.nextStart) {
+      entry.next = { title: p.title, start: p.start, stop: p.stop };
+      entry.nextStart = p.start;
+    }
+  }
+  for (const ch in out) delete out[ch].nextStart;
+  return out;
+}
+
+/** Fetch + cache a country's EPG summary. Resolves to { channels, fetchedAt }. */
+export function fetchCountryEpg(cc) {
+  cc = String(cc).toLowerCase();
+  if (epgCache.has(cc)) return Promise.resolve(epgCache.get(cc));
+  if (inflight.has(cc)) return inflight.get(cc);
+  const p = fetch(`/api/epg?country=${encodeURIComponent(cc)}`)
+    .then((res) => {
+      if (!res.ok) throw new Error(`EPG ${cc} → HTTP ${res.status}`);
+      return res.json();
+    })
+    .then((d) => {
+      const data = { channels: d.channels || {}, fetchedAt: Date.now() };
+      epgCache.set(cc, data);
+      return data;
+    })
+    .catch((err) => {
+      inflight.delete(cc);
+      throw err;
+    });
+  inflight.set(cc, p);
+  return p;
+}
+
+/** Look up a channel's now/next from already-loaded data (null if unknown). */
+export function getProgrammes(cc, channelId) {
+  return epgCache.get(String(cc).toLowerCase())?.channels?.[channelId] || null;
+}
