@@ -1,12 +1,14 @@
 # LiveWave — Free Live TV
 
-A no-backend web player for free live TV channels, powered entirely by the open
+A free live TV web player powered entirely by the open
 [iptv-org](https://github.com/iptv-org/iptv) playlist and [API](https://github.com/iptv-org/api).
-No database, no signup, no server — just static files that talk to iptv-org.
+No database, no signup — the app talks to iptv-org (directly, or through a small
+caching proxy when deployed on Vercel).
 
 ## How it works
 
-On load the app fetches three public datasets and joins them in the browser:
+On load the app fetches the channel playlist plus country metadata and joins them in the
+browser:
 
 | Data | Source | Used for |
 | --- | --- | --- |
@@ -15,8 +17,15 @@ On load the app fetches three public datasets and joins them in the browser:
 | Countries | [`iptv-org.github.io/api/countries.json`](https://iptv-org.github.io/api/countries.json) | Country names + flag emoji |
 
 Streams are played with [hls.js](https://github.com/video-dev/hls.js). The playlist is
-rebuilt by iptv-org every day, so the channel list is always current — the app never
-stores or caches anything itself.
+rebuilt by iptv-org every day, so the channel list is always current.
+
+**Vercel deployments use a caching proxy** (`api/playlist.js`, `api/meta.js`). Fetching
+~13 MB of data directly from `iptv-org.github.io` in the browser is slow or blocked on
+many networks, so those two tiny functions fetch the data server-side, cache it at the
+edge for 12 hours, and trim `channels.json` (10 MB) down to a small id→country map
+(~1 MB). The browser then only talks to the deployment's own domain. If the proxy is
+unavailable (e.g. the static build is hosted somewhere without functions), the app
+automatically falls back to fetching iptv-org directly. Local dev always fetches directly.
 
 ## Running locally
 
@@ -29,8 +38,11 @@ npm run preview  # preview the production build
 
 ## Deploying
 
-The app is 100% static. Build it and host the `dist/` folder anywhere — GitHub Pages,
-Netlify, Vercel, Cloudflare Pages, or a plain web server. Nothing else is required.
+Build it and host the `dist/` folder anywhere — GitHub Pages, Netlify, Vercel, Cloudflare
+Pages, or a plain web server. On **Vercel**, the `api/` folder is picked up automatically
+and the caching proxy kicks in (see above). On static hosts without functions, the app
+still works — it falls back to fetching iptv-org directly, which is slower on some
+networks.
 
 ## Known limitations
 
