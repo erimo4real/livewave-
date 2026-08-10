@@ -40,28 +40,6 @@ export function unescapeXml(s) {
     .replace(/&amp;/g, '&');
 }
 
-/**
- * Pick the current + next programme per channel.
- * @param {Array<{channel:string,start:number,stop:number,title:string}>} programmes
- * @returns {Record<string,{now:{title,start,stop}|null,next:{title,start,stop}|null}>}
- */
-export function selectNowNext(programmes) {
-  const now = Date.now();
-  const out = {};
-  for (const p of programmes) {
-    if (!isFinite(p.start) || !isFinite(p.stop) || !p.title) continue;
-    const entry = out[p.channel] || (out[p.channel] = { now: null, next: null, nextStart: Infinity });
-    if (p.start <= now && p.stop > now) {
-      if (!entry.now || p.start > entry.now.start) entry.now = { title: p.title, start: p.start, stop: p.stop };
-    } else if (p.start > now && p.start < entry.nextStart) {
-      entry.next = { title: p.title, start: p.start, stop: p.stop };
-      entry.nextStart = p.start;
-    }
-  }
-  for (const ch in out) delete out[ch].nextStart;
-  return out;
-}
-
 /** Fetch + cache a country's EPG summary. Resolves to { channels, fetchedAt }. */
 export function fetchCountryEpg(cc) {
   cc = String(cc).toLowerCase();
