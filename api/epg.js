@@ -34,7 +34,7 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'country must be a 2-letter code' });
     return;
   }
-  const channel = String(req.query.channel || '').toLowerCase();
+  const channel = String(req.query.channel || '');
   if (channel && !/^[\w.-]+$/.test(channel)) {
     res.status(400).json({ error: 'channel must be an iptv-org channel id' });
     return;
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
   res.setHeader('CDN-Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=21600');
 
   if (channel) {
-    const entry = channels.get(channel);
+    const entry = lookupChannel(channels, channel);
     res.status(200).json({
       channel,
       now: entry?.now || null,
@@ -80,6 +80,21 @@ export default async function handler(req, res) {
   const out = {};
   for (const [id, entry] of channels) out[id] = { now: entry.now, next: entry.next };
   res.status(200).json({ generated: new Date().toISOString(), channels: out });
+}
+
+/**
+ * Find a channel in the parsed map. XMLTV ids are case-preserved ("AIT.ng")
+ * while the query may arrive normalized, so fall back to a case-insensitive
+ * scan when the exact match misses (rare — only when the caller's case differs).
+ */
+function lookupChannel(channels, id) {
+  const hit = channels.get(id);
+  if (hit) return hit;
+  const lower = id.toLowerCase();
+  for (const [key, entry] of channels) {
+    if (key.toLowerCase() === lower) return entry;
+  }
+  return null;
 }
 
 /**
