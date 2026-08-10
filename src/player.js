@@ -11,6 +11,9 @@ export class StreamPlayer {
     this.hls = null;
     this.onError = null;
     this.onPlaying = null;
+    // Bound once so the same handlers can be added/removed across stream switches.
+    this._onNativeMeta = () => this.onPlaying?.();
+    this._onNativeErr = () => this.onError?.(new Error('Stream failed to load'));
   }
 
   load(url) {
@@ -52,17 +55,11 @@ export class StreamPlayer {
       });
       this.hls.loadSource(url);
       this.hls.attachMedia(this.video);
-    } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari / iOS native HLS
-      this.video.src = url;
-      this.video.addEventListener('loadedmetadata', () => this.onPlaying?.(), { once: true });
-      this.video.addEventListener('error', () => this.onError?.(new Error('Stream failed to load')), { once: true });
-      this.video.play().catch(() => {});
     } else {
-      // Plain MP4 / direct stream fallback
+      // Native HLS (Safari/iOS) or plain MP4 / direct stream fallback
+      this.video.addEventListener('loadedmetadata', this._onNativeMeta, { once: true });
+      this.video.addEventListener('error', this._onNativeErr, { once: true });
       this.video.src = url;
-      this.video.addEventListener('loadedmetadata', () => this.onPlaying?.(), { once: true });
-      this.video.addEventListener('error', () => this.onError?.(new Error('Stream failed to load')), { once: true });
       this.video.play().catch(() => {});
     }
   }
@@ -72,6 +69,8 @@ export class StreamPlayer {
       this.hls.destroy();
       this.hls = null;
     }
+    this.video.removeEventListener('loadedmetadata', this._onNativeMeta);
+    this.video.removeEventListener('error', this._onNativeErr);
     this.video.pause();
     this.video.removeAttribute('src');
     this.video.load();

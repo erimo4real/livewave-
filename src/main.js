@@ -149,6 +149,7 @@ function filtered() {
     query: state.query,
     country: state.country,
     category: state.category,
+    countryOf: state.data.countryOf,
   });
 }
 
@@ -234,6 +235,7 @@ function openModal(ch) {
   state.current = ch;
   state.streamIndex = 0;
   state.autoTries = 0;
+  state.httpsRetried = false;
   state.player = new StreamPlayer(el.player);
   state.player.onError = onStreamError;
   state.player.onPlaying = () => {
@@ -266,13 +268,18 @@ function openModal(ch) {
 function playStream() {
   const ch = state.current;
   const s = ch.streams[state.streamIndex];
+  // On https pages browsers block http:// media (mixed content). Many IPTV
+  // hosts serve both schemes, so try the https:// variant once first.
+  const isHttpsPage = location.protocol === 'https:';
+  const useHttps = isHttpsPage && s.url.startsWith('http://') && !state.httpsRetried;
+  const url = useHttps ? 'https://' + s.url.slice('http://'.length) : s.url;
   hideError();
   showOverlay(s.userAgent ? 'Starting stream (may need a special user-agent)…' : 'Starting stream…');
   el.openStream.href = s.url;
   // Fail fast: if the stream hasn't started within 12s it's dead or CORS-blocked.
   clearTimeout(state.startTimer);
   state.startTimer = setTimeout(() => onStreamError(new Error('Stream timed out')), 12000);
-  state.player.load(s.url);
+  state.player.load(url);
   el.player.play().catch(() => {});
   updateStreamListActive();
 }
@@ -281,12 +288,23 @@ function onStreamError(err) {
   console.warn('stream error:', err);
   clearTimeout(state.startTimer);
   const ch = state.current;
+  const s = ch.streams[state.streamIndex];
+
+  // If the http:// stream failed before we tried its https:// variant, retry
+  // it once (same stream, https) before moving on.
+  if (location.protocol === 'https:' && s.url.startsWith('http://') && !state.httpsRetried) {
+    state.httpsRetried = true;
+    playStream();
+    return;
+  }
+
   const next = state.streamIndex + 1;
 
   // Silently try up to 2 more streams before bothering the user.
   if (next < ch.streams.length && state.autoTries < 2) {
     state.autoTries += 1;
     state.streamIndex = next;
+    state.httpsRetried = false;
     playStream();
     return;
   }
@@ -310,6 +328,7 @@ function renderStreamList() {
     btn.addEventListener('click', () => {
       state.streamIndex = i;
       state.autoTries = 0;
+      state.httpsRetried = false;
       playStream();
     });
     el.streamList.appendChild(btn);
@@ -372,10 +391,12 @@ el.retryStream.addEventListener('click', () => {
   if (state.current && state.streamIndex + 1 < state.current.streams.length) {
     state.streamIndex += 1;
     state.autoTries = 0;
+    state.httpsRetried = false;
     playStream();
   } else {
     state.streamIndex = 0;
     state.autoTries = 0;
+    state.httpsRetried = false;
     playStream();
   }
 });

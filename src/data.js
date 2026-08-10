@@ -143,12 +143,16 @@ function collectCategories(channels) {
 }
 
 /** Filter a channel list by the active search/filters. */
-export function filterChannels(channels, { query, country, category }) {
+export function filterChannels(channels, { query, country, category, countryOf }) {
   const q = query.trim().toLowerCase();
   return channels.filter((ch) => {
     if (country && ch.country !== country) return false;
     if (category && ch.category !== category) return false;
-    if (q && !`${ch.name} ${ch.category}`.toLowerCase().includes(q)) return false;
+    if (q) {
+      const countryName = ch.country ? countryOf?.(ch.country)?.name || '' : '';
+      const haystack = `${ch.name} ${ch.category} ${countryName}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 }
