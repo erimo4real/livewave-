@@ -4,14 +4,22 @@
  *
  * Loading is progressive: the channel grid renders from the playlist
  * (~3 MB) immediately, and the country filter fills in later when the
- * larger channel metadata file (~10 MB) arrives.
+ * channel metadata arrives.
+ *
+ * Production builds fetch through the deployment's own caching proxy
+ * (/api/playlist, /api/meta — see api/ folder) so the browser never
+ * downloads the big files from iptv-org.github.io, which many networks
+ * throttle or block. If the proxy is unavailable (e.g. the static build
+ * is hosted somewhere without functions), it falls back to iptv-org
+ * directly. Local dev always fetches directly.
  */
 import { parseM3U, qualityRank, stripQualitySuffix } from './m3u.js';
 
-export const PLAYLIST_URL = 'https://iptv-org.github.io/iptv/index.m3u';
-export const CHANNELS_URL = 'https://iptv-org.github.io/api/channels.json';
-export const COUNTRIES_URL = 'https://iptv-org.github.io/api/countries.json';
+const DIRECT_PLAYLIST = 'https://iptv-org.github.io/iptv/index.m3u';
+const DIRECT_CHANNELS = 'https://iptv-org.github.io/api/channels.json';
+const DIRECT_COUNTRIES = 'https://iptv-org.github.io/api/countries.json';
 
+const USE_PROXY = !import.meta.env.DEV;
 const FETCH_TIMEOUT = 60000; // 60s — long enough for slow links, short enough to never hang forever
 
 const bytes = (n) => (n / 1048576).toFixed(1) + ' MB';
@@ -24,28 +32,60 @@ function fetchWithTimeout(url) {
 
 /** Fetch and parse the channel playlist. Throws on failure. */
 export async function fetchPlaylist(onProgress) {
-  const res = await fetchWithTimeout(PLAYLIST_URL);
-  if (!res.ok) throw new Error(`${PLAYLIST_URL} → HTTP ${res.status}`);
-  onProgress?.({ label: 'Downloading channel list', size: bytes(Number(res.headers.get('content-length') || 0)) });
-  const text = await res.text();
-  onProgress?.({ label: 'Parsing channel list' });
-  return parseM3U(text);
+  const urls = USE_PROXY ? ['/api/playlist', DIRECT_PLAYLIST] : [DIRECT_PLAYLIST];
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+      onProgress?.({ label: 'Downloading channel list', size: bytes(Number(res.headers.get('content-length') || 0)) });
+      const text = await res.text();
+      onProgress?.({ label: 'Parsing channel list' });
+      return parseM3U(text);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('failed to load playlist');
 }
 
-/** Fetch country + channel metadata (used for country flags/filter). */
+/**
+ * Fetch country + channel metadata (used for country flags/filter).
+ * Returns { channelCountry: {id: countryCode}, countries: [...] }.
+ */
 export async function fetchMeta(onProgress) {
+  onProgress?.({ label: 'Downloading country info' });
+  if (USE_PROXY) {
+    try {
+      const res = await fetchWithTimeout('/api/meta');
+      if (res.ok) return res.json();
+    } catch {
+      // proxy unavailable — fall back to fetching iptv-org directly
+    }
+  }
   const [channelsJson, countriesJson] = await Promise.all([
-    fetchWithTimeout(CHANNELS_URL).then((r) => {
-      if (!r.ok) throw new Error(`${CHANNELS_URL} → HTTP ${r.status}`);
-      onProgress?.({ label: 'Downloading country info', size: bytes(Number(r.headers.get('content-length') || 0)) });
+    fetchWithTimeout(DIRECT_CHANNELS).then((r) => {
+      if (!r.ok) throw new Error(`${DIRECT_CHANNELS} → HTTP ${r.status}`);
       return r.json();
     }),
-    fetchWithTimeout(COUNTRIES_URL).then((r) => {
-      if (!r.ok) throw new Error(`${COUNTRIES_URL} → HTTP ${r.status}`);
+    fetchWithTimeout(DIRECT_COUNTRIES).then((r) => {
+      if (!r.ok) throw new Error(`${DIRECT_COUNTRIES} → HTTP ${r.status}`);
       return r.json();
     }),
   ]);
-  return { channelsJson, countriesJson };
+  return trimMeta(channelsJson, countriesJson);
+}
+
+/** Reduce the ~10 MB channels.json to just the id→country map the UI needs. */
+export function trimMeta(channelsJson, countriesJson) {
+  const channelCountry = {};
+  for (const c of channelsJson) {
+    if (!c.closed && c.country) channelCountry[c.id] = c.country;
+  }
+  const countries = countriesJson
+    .filter((c) => c.flag)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { channelCountry, countries };
 }
 
 /**
@@ -53,14 +93,8 @@ export async function fetchMeta(onProgress) {
  * Metadata may be null (not loaded yet) — countries are then omitted.
  */
 export function buildChannels(entries, meta) {
-  const countryById = new Map();
-  let countries = [];
-  if (meta) {
-    for (const c of meta.channelsJson) {
-      if (!c.closed && c.country) countryById.set(c.id, c.country);
-    }
-    countries = meta.countriesJson.filter((c) => c.flag).sort((a, b) => a.name.localeCompare(b.name));
-  }
+  const countryById = meta?.channelCountry || {};
+  let countries = meta?.countries || [];
 
   const byCountry = new Map(countries.map((c) => [c.code, c]));
   const countryOf = (code) => byCountry.get(code);
@@ -74,7 +108,7 @@ export function buildChannels(entries, meta) {
         name: stripQualitySuffix(e.name),
         logo: e.logo,
         category: e.category,
-        country: countryById.get(e.id) || null,
+        country: countryById[e.id] || null,
         streams: [],
         streamUrls: new Set(),
       };
