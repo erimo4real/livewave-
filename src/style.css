@@ -448,6 +448,13 @@ a {
   z-index: 100;
 }
 
+/* The `hidden` attribute must actually hide the modal — without this the
+   author `display: flex` above overrides the UA's [hidden] rule and the
+   dark backdrop stays painted over the whole app after closing the player. */
+.modal-backdrop[hidden] {
+  display: none;
+}
+
 .modal {
   width: min(920px, 100%);
   max-height: 94vh;
