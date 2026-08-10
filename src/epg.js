@@ -13,6 +13,8 @@
 
 const epgCache = new Map(); // cc -> { channels, fetchedAt }
 const inflight = new Map(); // cc -> Promise
+const lineupCache = new Map(); // "cc:id" -> { now, next, lineup }
+const lineupInflight = new Map(); // "cc:id" -> Promise
 
 /** Parse an XMLTV timestamp "20260809100000 +0000" into epoch ms. */
 export function xmltvTimeToEpoch(s) {
@@ -70,4 +72,43 @@ export function fetchCountryEpg(cc) {
 /** Look up a channel's now/next from already-loaded data (null if unknown). */
 export function getProgrammes(cc, channelId) {
   return epgCache.get(String(cc).toLowerCase())?.channels?.[channelId] || null;
+}
+
+/**
+ * Fetch one channel's full programme lineup (current + upcoming ~6 h) from
+ * /api/epg?country=..&channel=.. — a tiny response, unlike the whole-country
+ * summary. Resolves to { now, next, lineup } or rejects on failure.
+ */
+export function fetchChannelLineup(cc, channelId) {
+  cc = String(cc).toLowerCase();
+  channelId = String(channelId);
+  const key = `${cc}:${channelId}`;
+  if (lineupCache.has(key)) return Promise.resolve(lineupCache.get(key));
+  if (lineupInflight.has(key)) return lineupInflight.get(key);
+  const p = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    try {
+      const res = await fetch(`/api/epg?country=${encodeURIComponent(cc)}&channel=${encodeURIComponent(channelId)}`, {
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`EPG ${key} → HTTP ${res.status}`);
+      const d = await res.json();
+      const data = { now: d.now || null, next: d.next || null, lineup: d.lineup || [] };
+      lineupCache.set(key, data);
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  })().catch((err) => {
+    lineupInflight.delete(key);
+    throw err;
+  });
+  lineupInflight.set(key, p);
+  return p;
+}
+
+/** Look up a channel's cached lineup (null if not fetched yet). */
+export function getChannelLineup(cc, channelId) {
+  return lineupCache.get(`${String(cc).toLowerCase()}:${channelId}`) || null;
 }

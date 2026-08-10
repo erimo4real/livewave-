@@ -573,6 +573,74 @@ a {
   font-weight: 600;
 }
 
+.programme-guide {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.guide-heading {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  background: rgb(255 255 255 / 0.02);
+}
+
+.guide-list {
+  max-height: 264px;
+  overflow-y: auto;
+}
+
+.guide-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 7px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.04);
+}
+
+.guide-row:last-child {
+  border-bottom: none;
+}
+
+.guide-row.now {
+  background: rgb(229 35 58 / 0.12);
+  border-left: 3px solid var(--accent);
+  padding-left: 11px;
+}
+
+.guide-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: 12px;
+  min-width: 96px;
+}
+
+.guide-row.now .guide-time {
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.guide-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guide-row.now .guide-title {
+  color: #fff;
+  font-weight: 600;
+}
+
 /* ---------------------------------- toast ---------------------------------- */
 
 .toast {

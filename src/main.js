@@ -1,5 +1,5 @@
 import { fetchPlaylist, fetchMeta, buildChannels, filterChannels } from './data.js';
-import { fetchCountryEpg, getProgrammes } from './epg.js';
+import { fetchCountryEpg, getProgrammes, fetchChannelLineup, getChannelLineup } from './epg.js';
 import { StreamPlayer } from './player.js';
 import './style.css';
 
@@ -42,6 +42,8 @@ const el = {
   streamList: $('stream-list'),
   favModal: $('fav-modal'),
   playerProgramme: $('player-programme'),
+  programmeGuide: $('programme-guide'),
+  programmeGuideList: $('programme-guide-list'),
   emptyText: document.querySelector('#empty p'),
 };
 
@@ -344,21 +346,29 @@ function openModal(ch) {
     .filter(Boolean)
     .join(' · ');
 
-  // EPG: show what's on now/next; fetch the country's guide on demand.
+  // EPG: topbar now/next line + the mini programme guide. The guide comes from
+  // one tiny per-channel request (the whole-country summary is only fetched in
+  // the background for cards). If a prefetched summary already has this
+  // channel, show the line instantly; the lineup request fills the guide.
   el.playerProgramme.textContent = '';
+  renderGuide();
   if (ch.country) {
     const cc = ch.country;
     const prog = getProgrammes(cc, ch.id);
-    if (prog) {
-      setProgrammeText(prog);
-    } else {
-      fetchCountryEpg(cc)
-        .then(() => {
-          if (state.current?.id === ch.id) setProgrammeText(getProgrammes(cc, ch.id));
-        })
-        .catch(() => {});
-    }
+    if (prog) setProgrammeText(prog);
+    fetchChannelLineup(cc, ch.id)
+      .then((data) => {
+        if (state.current?.id !== ch.id) return; // modal switched while fetching
+        if (!getProgrammes(cc, ch.id)) setProgrammeText(data); // fill topbar line
+        renderGuide();
+      })
+      .catch(() => {});
   }
+  // Keep the "now" highlight fresh while the modal is open.
+  clearInterval(state.guideTimer);
+  state.guideTimer = setInterval(() => {
+    if (state.current) renderGuide();
+  }, 60000);
 
   renderStreamList();
   hideError();
@@ -448,6 +458,7 @@ function updateStreamListActive() {
 
 function closeModal() {
   clearTimeout(state.startTimer);
+  clearInterval(state.guideTimer);
   if (state.player) {
     state.player.destroy();
     state.player = null;
@@ -508,6 +519,48 @@ function setProgrammeText(prog) {
   } else {
     el.playerProgramme.textContent = '';
   }
+}
+
+/**
+ * Render the modal's mini programme guide from the cached lineup. The panel
+ * stays hidden when no EPG data is available for the channel.
+ */
+function renderGuide() {
+  const ch = state.current;
+  if (!ch?.country) {
+    el.programmeGuide.hidden = true;
+    return;
+  }
+  const data = getChannelLineup(ch.country, ch.id);
+  const list = data?.lineup || [];
+  if (!list.length) {
+    el.programmeGuide.hidden = true;
+    return;
+  }
+
+  const now = Date.now();
+  el.programmeGuideList.textContent = '';
+  for (const p of list) {
+    const row = document.createElement('div');
+    row.className = 'guide-row' + (p.start <= now && now < p.stop ? ' now' : '');
+
+    const time = document.createElement('span');
+    time.className = 'guide-time';
+    time.textContent = `${fmtClock(p.start)} – ${fmtClock(p.stop)}`;
+
+    const title = document.createElement('span');
+    title.className = 'guide-title';
+    title.textContent = p.title;
+    title.title = p.title;
+
+    row.append(time, title);
+    el.programmeGuideList.appendChild(row);
+  }
+  el.programmeGuide.hidden = false;
+}
+
+function fmtClock(t) {
+  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 /* ---------------------------------- events --------------------------------- */
