@@ -7,8 +7,8 @@
  * (huge) XMLTV file down to a compact now/next summary and caches it at the
  * edge. In local dev, vite.config.js proxies /api to the deployed app.
  *
- * The pure helpers here (xmltvTimeToEpoch, unescapeXml, selectNowNext) are
- * shared with the api/epg.js proxy function — keep them free of browser APIs.
+ * The pure helpers here (xmltvTimeToEpoch, unescapeXml) are shared with the
+ * api/epg.js proxy function — keep them free of browser APIs.
  */
 
 const epgCache = new Map(); // cc -> { channels, fetchedAt }
@@ -29,9 +29,10 @@ export function xmltvTimeToEpoch(s) {
 
 /** Decode the entities XMLTV producers actually use. */
 export function unescapeXml(s) {
+  const cp = (n) => (Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '');
   return String(s)
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => cp(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => cp(+d))
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -45,20 +46,23 @@ export function fetchCountryEpg(cc) {
   cc = String(cc).toLowerCase();
   if (epgCache.has(cc)) return Promise.resolve(epgCache.get(cc));
   if (inflight.has(cc)) return inflight.get(cc);
-  const p = fetch(`/api/epg?country=${encodeURIComponent(cc)}`)
-    .then((res) => {
+  const p = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    try {
+      const res = await fetch(`/api/epg?country=${encodeURIComponent(cc)}`, { signal: ctrl.signal });
       if (!res.ok) throw new Error(`EPG ${cc} → HTTP ${res.status}`);
-      return res.json();
-    })
-    .then((d) => {
+      const d = await res.json();
       const data = { channels: d.channels || {}, fetchedAt: Date.now() };
       epgCache.set(cc, data);
       return data;
-    })
-    .catch((err) => {
-      inflight.delete(cc);
-      throw err;
-    });
+    } finally {
+      clearTimeout(timer);
+    }
+  })().catch((err) => {
+    inflight.delete(cc);
+    throw err;
+  });
   inflight.set(cc, p);
   return p;
 }
