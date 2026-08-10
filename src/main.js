@@ -1,4 +1,4 @@
-import { fetchPlaylist, fetchMeta, buildChannels, filterChannels } from './data.js';
+import { fetchPlaylist, fetchMeta, buildChannels, filterChannels, withProgrammeMatches } from './data.js';
 import { fetchCountryEpg, getProgrammes, fetchChannelLineup, getChannelLineup } from './epg.js';
 import { StreamPlayer } from './player.js';
 import './style.css';
@@ -205,7 +205,22 @@ function filtered() {
     countryOf: state.data.countryOf,
   });
   if (state.favOnly) list = list.filter((ch) => state.favorites.has(ch.id));
+  // Also match what's currently airing, using EPG data already in memory.
+  list = withProgrammeMatches(list, state.data.channels, {
+    query: state.query,
+    country: state.country,
+    category: state.category,
+    nowTitleOf,
+  });
   return list;
+}
+
+/** The title of what's currently airing on a channel ('' when unknown). */
+function nowTitleOf(ch) {
+  if (!ch.country) return '';
+  const prog = getProgrammes(ch.country, ch.id);
+  if (prog?.now?.title) return prog.now.title;
+  return getChannelLineup(ch.country, ch.id)?.now?.title || '';
 }
 
 function render() {

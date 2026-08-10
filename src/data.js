@@ -156,3 +156,25 @@ export function filterChannels(channels, { query, country, category, countryOf }
     return true;
   });
 }
+
+/**
+ * Append channels whose currently-airing programme title matches the query.
+ *
+ * Regular matches (name/category/country) stay first — they rank higher — then
+ * channels found only by "what's on now" follow, in the same name-sorted order.
+ * `nowTitleOf` is a callback returning the channel's current programme title
+ * ('' when unknown); it may read EPG data the app already has in memory.
+ * Respects the same country/category filters as the main pass.
+ */
+export function withProgrammeMatches(list, allChannels, { query, country, category, nowTitleOf }) {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return list; // 1-char queries match almost every title — noise
+  const matched = new Set(list.map((ch) => ch.id));
+  const extra = allChannels.filter((ch) => {
+    if (matched.has(ch.id)) return false;
+    if (country && ch.country !== country) return false;
+    if (category && ch.category !== category) return false;
+    return nowTitleOf(ch).toLowerCase().includes(q);
+  });
+  return extra.length ? [...list, ...extra] : list;
+}
