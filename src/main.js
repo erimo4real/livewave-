@@ -528,12 +528,14 @@ function setProgrammeText(prog) {
 function renderGuide() {
   const ch = state.current;
   if (!ch?.country) {
+    el.programmeGuideList.textContent = '';
     el.programmeGuide.hidden = true;
     return;
   }
   const data = getChannelLineup(ch.country, ch.id);
   const list = data?.lineup || [];
   if (!list.length) {
+    el.programmeGuideList.textContent = '';
     el.programmeGuide.hidden = true;
     return;
   }
