@@ -19,6 +19,10 @@ browser:
 Streams are played with [hls.js](https://github.com/video-dev/hls.js). The playlist is
 rebuilt by iptv-org every day, so the channel list is always current.
 
+**LiveWave is also a PWA**: on production builds a service worker (`public/sw.js`)
+caches the app shell and last-known channel data, so the site installs like an app
+(Chrome/Edge/Safari offer an *Install app* button) and loads fast or works offline.
+
 **Vercel deployments use a caching proxy** (`api/playlist.js`, `api/meta.js`). Fetching
 ~13 MB of data directly from `iptv-org.github.io` in the browser is slow or blocked on
 many networks, so those two tiny functions fetch the data server-side, cache it at the

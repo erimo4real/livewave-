@@ -22,6 +22,7 @@ const el = {
   favFilter: $('fav-filter'),
   resultCount: $('result-count'),
   headerStats: $('header-stats'),
+  installBtn: $('install-btn'),
   // modal
   modal: $('modal'),
   player: $('player'),
@@ -505,6 +506,37 @@ function flash(msg) {
   badge.textContent = msg;
   document.body.appendChild(badge);
   setTimeout(() => badge.remove(), 2200);
+}
+
+/* ------------------------------- PWA install ------------------------------- */
+
+let deferredInstall = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); // don't show the default mini-infobar; use our button
+  deferredInstall = e;
+  el.installBtn.hidden = false;
+});
+
+el.installBtn.addEventListener('click', async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  await deferredInstall.userChoice.catch(() => {});
+  deferredInstall = null;
+  el.installBtn.hidden = true;
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstall = null;
+  el.installBtn.hidden = true;
+});
+
+// Register the service worker in production builds so the app can be installed
+// and works offline. Dev stays unregistered to keep Vite HMR clean.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
 }
 
 boot();
