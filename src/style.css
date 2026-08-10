@@ -162,6 +162,15 @@ a {
   border-color: var(--accent);
 }
 
+.filter:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.league-filter {
+  max-width: 210px;
+}
+
 .result-count {
   margin-left: auto;
   font-size: 13px;
@@ -390,6 +399,17 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-meta .league-chip {
+  background: rgb(229 35 58 / 0.14);
+  border: 1px solid rgb(229 35 58 / 0.35);
+  color: #ffb3bc;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .load-more {

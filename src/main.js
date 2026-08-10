@@ -1,4 +1,5 @@
 import { fetchPlaylist, fetchMeta, buildChannels, filterChannels, withProgrammeMatches } from './data.js';
+import { isFootballChannel, footballLeagues } from './football.js';
 import { fetchCountryEpg, getProgrammes, fetchChannelLineup, getChannelLineup } from './epg.js';
 import { StreamPlayer } from './player.js';
 import './style.css';
@@ -21,6 +22,8 @@ const el = {
   categoryFilter: $('category-filter'),
   clearFilters: $('clear-filters'),
   favFilter: $('fav-filter'),
+  footballFilter: $('football-filter'),
+  leagueFilter: $('league-filter'),
   resultCount: $('result-count'),
   headerStats: $('header-stats'),
   installBtn: $('install-btn'),
@@ -49,11 +52,15 @@ const el = {
 
 const FAV_KEY = 'livewave:favorites';
 
+let footballCount = 0; // total football channels (set in populateFilters)
+
 const state = {
   data: null,
   channelById: new Map(),
   favorites: loadFavorites(),
   favOnly: false,
+  footballOnly: false,
+  league: '',
   query: '',
   country: '',
   category: '',
@@ -99,6 +106,14 @@ function updateFavUI() {
     el.favModal.textContent = fav ? '★ Saved' : '☆ Favorite';
     el.favModal.classList.toggle('on', fav);
   }
+}
+
+/** Keep the football button + league select in sync with the filter state. */
+function updateFootballUI() {
+  el.footballFilter.textContent = `⚽ Football${footballCount ? ` (${footballCount})` : ''}`;
+  el.footballFilter.classList.toggle('active', state.footballOnly);
+  el.leagueFilter.disabled = !state.footballOnly && !state.league;
+  if (!state.footballOnly && !state.league) el.leagueFilter.value = '';
 }
 
 /* ---------------------------------- boot ---------------------------------- */
@@ -185,6 +200,19 @@ function populateFilters() {
     opt.textContent = `${cat.name} (${cat.count.toLocaleString()})`;
     el.categoryFilter.appendChild(opt);
   }
+
+  // Football league tags are derived from channel names — collect them here.
+  const leagues = new Set();
+  for (const ch of channels) for (const lg of footballLeagues(ch.name)) leagues.add(lg);
+  el.leagueFilter.length = 1; // keep "All leagues"
+  for (const lg of [...leagues].sort((a, b) => a.localeCompare(b))) {
+    const opt = document.createElement('option');
+    opt.value = lg;
+    opt.textContent = lg;
+    el.leagueFilter.appendChild(opt);
+  }
+
+  footballCount = channels.filter((ch) => isFootballChannel(ch.name)).length;
 }
 
 function applyFilters() {
@@ -205,6 +233,13 @@ function filtered() {
     countryOf: state.data.countryOf,
   });
   if (state.favOnly) list = list.filter((ch) => state.favorites.has(ch.id));
+  // Football: a chosen league narrows the football channels; the ⚽ button
+  // alone shows all of them. Multi-sport networks stay out by design.
+  if (state.league) {
+    list = list.filter((ch) => footballLeagues(ch.name).includes(state.league));
+  } else if (state.footballOnly) {
+    list = list.filter((ch) => isFootballChannel(ch.name));
+  }
   // Also match what's currently airing, using EPG data already in memory.
   list = withProgrammeMatches(list, state.data.channels, {
     query: state.query,
@@ -225,7 +260,7 @@ function nowTitleOf(ch) {
 
 function render() {
   const list = filtered();
-  const anyFilter = state.query || state.country || state.category || state.favOnly;
+  const anyFilter = state.query || state.country || state.category || state.favOnly || state.footballOnly || state.league;
 
   el.clearFilters.hidden = !anyFilter;
   el.resultCount.textContent = list.length
@@ -235,7 +270,11 @@ function render() {
   if (list.length === 0) {
     el.emptyText.textContent = state.favOnly && state.favorites.size === 0
       ? 'No favorites yet — tap the ☆ on any channel to save it.'
-      : '😕 No channels match your filters.';
+      : state.league
+        ? `No ${state.league} channels in the free playlist right now.`
+        : state.footballOnly
+          ? '😕 No football channels match your other filters.'
+          : '😕 No channels match your filters.';
   }
 
   el.grid.textContent = '';
@@ -245,6 +284,7 @@ function render() {
   el.loadMore.hidden = state.visible >= list.length;
   el.loadMore.textContent = `Show more (${(list.length - state.visible).toLocaleString()} remaining)`;
   updateFavUI();
+  updateFootballUI();
 }
 
 function card(ch) {
@@ -310,6 +350,16 @@ function card(ch) {
   cat.className = 'cat';
   cat.textContent = ch.category === 'Undefined' ? 'Other' : ch.category;
   meta.appendChild(cat);
+  // In football mode, show which leagues each channel carries.
+  if (state.footballOnly || state.league) {
+    for (const lg of footballLeagues(ch.name)) {
+      const chip = document.createElement('span');
+      chip.className = 'league-chip';
+      chip.textContent = lg;
+      chip.title = lg;
+      meta.appendChild(chip);
+    }
+  }
 
   btn.append(logo, name);
   const prog = ch.country ? getProgrammes(ch.country, ch.id) : null;
@@ -593,10 +643,24 @@ el.clearFilters.addEventListener('click', () => {
   el.countryFilter.value = '';
   el.categoryFilter.value = '';
   state.favOnly = false;
+  state.footballOnly = false;
+  state.league = '';
   applyFilters();
 });
 el.favFilter.addEventListener('click', () => {
   state.favOnly = !state.favOnly;
+  state.visible = PAGE;
+  render();
+});
+el.footballFilter.addEventListener('click', () => {
+  state.footballOnly = !state.footballOnly;
+  if (!state.footballOnly) state.league = '';
+  state.visible = PAGE;
+  render();
+});
+el.leagueFilter.addEventListener('change', () => {
+  state.league = el.leagueFilter.value;
+  if (state.league) state.footballOnly = true; // a league implies football
   state.visible = PAGE;
   render();
 });

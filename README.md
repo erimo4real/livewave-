@@ -24,6 +24,12 @@ per-country XMLTV schedules down to the current + next programme per channel, ca
 the edge. Cards show a *Now:* line for the biggest countries and the player shows the
 full on-now/next line for any channel with listings. Coverage varies by provider.
 
+**⚽ Football quick filter**: the toolbar's *Football* button shows every football
+channel in the playlist (dedicated football networks, club and league channels —
+40 in the current playlist), and the *All leagues* dropdown narrows them by
+competition (Premier League, Champions League, La Liga, Serie A, …). Tags are
+derived from channel names in the browser — no extra data or API.
+
 **LiveWave is also a PWA**: on production builds a service worker (`public/sw.js`)
 caches the app shell and last-known channel data, so the site installs like an app
 (Chrome/Edge/Safari offer an *Install app* button) and loads fast or works offline.
