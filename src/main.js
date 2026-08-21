@@ -54,6 +54,9 @@ const FAV_KEY = 'livewave:favorites';
 
 let footballCount = 0; // total football channels (set in populateFilters)
 
+let openModalGeneration = 0; // guards against overlapping async openModal calls
+const cardElements = new Map(); // channelId -> { cardEl, nowEl } for in-place EPG updates
+
 const state = {
   data: null,
   channelById: new Map(),
@@ -69,6 +72,7 @@ const state = {
   streamIndex: 0,
   autoTries: 0,
   player: null,
+  streamHealth: new Map(), // url -> { ok: boolean, timestamp: number }
 };
 
 /* -------------------------------- favorites -------------------------------- */
@@ -278,6 +282,7 @@ function render() {
   }
 
   el.grid.textContent = '';
+  cardElements.clear();
   const slice = list.slice(0, state.visible);
   for (const ch of slice) el.grid.appendChild(card(ch));
 
@@ -362,16 +367,18 @@ function card(ch) {
   }
 
   btn.append(logo, name);
+  let nowEl = null;
   const prog = ch.country ? getProgrammes(ch.country, ch.id) : null;
   if (prog?.now) {
-    const now = document.createElement('div');
-    now.className = 'card-now';
-    now.textContent = `Now: ${prog.now.title}`;
-    now.title = `On now: ${prog.now.title}\nNext: ${prog.next ? prog.next.title : '—'}`;
-    btn.appendChild(now);
+    nowEl = document.createElement('div');
+    nowEl.className = 'card-now';
+    nowEl.textContent = `Now: ${prog.now.title}`;
+    nowEl.title = `On now: ${prog.now.title}\nNext: ${prog.next ? prog.next.title : '—'}`;
+    btn.appendChild(nowEl);
   }
   btn.appendChild(meta);
   btn.addEventListener('click', () => openModal(ch));
+  cardElements.set(ch.id, { cardEl: btn, nowEl });
   return btn;
 }
 
@@ -384,17 +391,110 @@ function initials(name) {
     .toUpperCase() || 'TV';
 }
 
+/**
+ * In-place EPG update: when new programme data arrives (from prefetchEpg),
+ * update just the "Now:" labels on visible cards instead of rebuilding the
+ * entire grid.  This avoids the flicker and GC pressure of a full re-render.
+ */
+function updateEpgLabels() {
+  for (const [id, refs] of cardElements) {
+    if (!refs.cardEl.isConnected) continue; // card was removed by a re-render
+    const ch = state.data.channelById.get(id);
+    if (!ch) continue;
+    const prog = ch.country ? getProgrammes(ch.country, ch.id) : null;
+    if (prog?.now) {
+      if (!refs.nowEl) {
+        // "Now:" element didn't exist yet — create and insert it.
+        const nowEl = document.createElement('div');
+        nowEl.className = 'card-now';
+        const metaEl = refs.cardEl.querySelector('.card-meta');
+        refs.cardEl.insertBefore(nowEl, metaEl);
+        refs.nowEl = nowEl;
+      }
+      refs.nowEl.textContent = `Now: ${prog.now.title}`;
+      refs.nowEl.title = `On now: ${prog.now.title}\nNext: ${prog.next ? prog.next.title : '—'}`;
+    }
+  }
+}
+
 /* ---------------------------------- modal ---------------------------------- */
 
-function openModal(ch) {
+/**
+ * Quick HEAD-style probe: does the stream server respond at all?
+ * Uses the CORS proxy so we avoid mixed-content / CORS blocks during probing.
+ */
+async function probeStream(url, timeoutMs = 4000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`/api/stream?url=${encodeURIComponent(url)}`, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    // Cancel the body immediately — we only needed the status code.
+    if (res.body) res.body.cancel().catch(() => {});
+    return res.ok;
+  } catch {
+    clearTimeout(timer);
+    return false;
+  }
+}
+
+/**
+ * Probe all streams in parallel; resolve with the index of the first one
+ * whose server responds OK.  Streams known-dead from a recent probe are
+ * skipped.  Falls back to index 0 when nothing responds.
+ */
+async function findBestStream(streams) {
+  if (streams.length <= 1) return 0;
+
+  const PROBE_TIMEOUT = 4000;
+  const FRESHNESS_MS = 5 * 60_000; // skip streams dead <5 min ago
+
+  // Filter out recently-probed dead streams
+  const candidates = streams
+    .map((s, i) => ({ stream: s, index: i }))
+    .filter(({ stream }) => {
+      const h = state.streamHealth.get(stream.url);
+      if (h && !h.ok && Date.now() - h.timestamp < FRESHNESS_MS) return false;
+      return true;
+    });
+
+  if (candidates.length === 0) return 0; // all known-dead — try first anyway
+  if (candidates.length === 1) return candidates[0].index;
+
+  // Fire probes in parallel; resolve with the first success.
+  const probes = candidates.map(({ stream, index }) =>
+    probeStream(stream.url, PROBE_TIMEOUT).then((ok) => {
+      state.streamHealth.set(stream.url, { ok, timestamp: Date.now() });
+      if (!ok) throw new Error('probe failed');
+      return index;
+    }),
+  );
+
+  try {
+    return await Promise.any(probes);
+  } catch {
+    return candidates[0].index;
+  }
+}
+
+async function openModal(ch) {
+  const generation = ++openModalGeneration;
+
   state.current = ch;
   state.streamIndex = 0;
   state.autoTries = 0;
-  state.httpsRetried = false;
+  state.proxyRetried = false;
   state.player = new StreamPlayer(el.player);
   state.player.onError = onStreamError;
   state.player.onPlaying = () => {
     clearTimeout(state.startTimer);
+    // Mark this stream as working in the health cache
+    if (state.current) {
+      const s = state.current.streams[state.streamIndex];
+      state.streamHealth.set(s.url, { ok: true, timestamp: Date.now() });
+    }
     hideOverlay();
   };
 
@@ -411,10 +511,7 @@ function openModal(ch) {
     .filter(Boolean)
     .join(' · ');
 
-  // EPG: topbar now/next line + the mini programme guide. The guide comes from
-  // one tiny per-channel request (the whole-country summary is only fetched in
-  // the background for cards). If a prefetched summary already has this
-  // channel, show the line instantly; the lineup request fills the guide.
+  // EPG: topbar now/next line + the mini programme guide.
   el.playerProgramme.textContent = '';
   renderGuide();
   if (ch.country) {
@@ -423,13 +520,12 @@ function openModal(ch) {
     if (prog) setProgrammeText(prog);
     fetchChannelLineup(cc, ch.id)
       .then((data) => {
-        if (state.current?.id !== ch.id) return; // modal switched while fetching
-        if (!getProgrammes(cc, ch.id)) setProgrammeText(data); // fill topbar line
+        if (state.current?.id !== ch.id) return;
+        if (!getProgrammes(cc, ch.id)) setProgrammeText(data);
         renderGuide();
       })
       .catch(() => {});
   }
-  // Keep the "now" highlight fresh while the modal is open.
   clearInterval(state.guideTimer);
   state.guideTimer = setInterval(() => {
     if (state.current) renderGuide();
@@ -437,30 +533,43 @@ function openModal(ch) {
 
   renderStreamList();
   hideError();
-  showOverlay('Starting stream…');
   updateFavUI();
-  playStream();
 
   el.modal.hidden = false;
   document.body.classList.add('modal-open');
+
+  // Probe all streams in parallel to find the one most likely to work.
+  if (ch.streams.length > 1) {
+    showOverlay('Finding best stream…');
+  } else {
+    showOverlay('Starting stream…');
+  }
+  state.streamIndex = await findBestStream(ch.streams);
+
+  // If the user opened a different channel while we were probing, bail out.
+  if (generation !== openModalGeneration) return;
+
+  state.proxyRetried = false;
+  playStream();
 }
 
 function playStream() {
   const ch = state.current;
   const s = ch.streams[state.streamIndex];
   // On https pages browsers block http:// media (mixed content). Many IPTV
-  // hosts serve both schemes, so try the https:// variant once first.
+  // hosts serve both schemes, so try the https:// variant.
   const isHttpsPage = location.protocol === 'https:';
-  const useHttps = isHttpsPage && s.url.startsWith('http://') && !state.httpsRetried;
-  const url = useHttps ? 'https://' + s.url.slice('http://'.length) : s.url;
+  const url = isHttpsPage && s.url.startsWith('http://')
+    ? 'https://' + s.url.slice('http://'.length)
+    : s.url;
   hideError();
   showOverlay(s.userAgent ? 'Starting stream (may need a special user-agent)…' : 'Starting stream…');
   el.openStream.href = s.url;
   // Fail fast: if the stream hasn't started within 12s it's dead or CORS-blocked.
   clearTimeout(state.startTimer);
   state.startTimer = setTimeout(() => onStreamError(new Error('Stream timed out')), 12000);
-  state.player.load(url);
-  el.player.play().catch(() => {});
+  // Pass the original (unrewritten) URL so the proxy can fetch it correctly.
+  state.player.load(url, s.url);
   updateStreamListActive();
 }
 
@@ -470,28 +579,44 @@ function onStreamError(err) {
   const ch = state.current;
   const s = ch.streams[state.streamIndex];
 
-  // If the http:// stream failed before we tried its https:// variant, retry
-  // it once (same stream, https) before moving on.
-  if (location.protocol === 'https:' && s.url.startsWith('http://') && !state.httpsRetried) {
-    state.httpsRetried = true;
-    playStream();
+  // Record this stream as dead in the health cache.
+  state.streamHealth.set(s.url, { ok: false, timestamp: Date.now() });
+
+  // Retry through the CORS proxy — bypasses mixed-content and CORS blocks
+  // that prevent the browser from loading IPTV streams directly.
+  if (!state.proxyRetried) {
+    state.proxyRetried = true;
+    state.player.retryViaProxy();
+    showOverlay('Retrying through proxy…');
+    clearTimeout(state.startTimer);
+    state.startTimer = setTimeout(() => onStreamError(new Error('Stream timed out')), 15000);
     return;
   }
 
-  const next = state.streamIndex + 1;
+  // Find the next stream that isn't known-dead.
+  const FRESHNESS_MS = 5 * 60_000;
+  let next = state.streamIndex + 1;
+  while (next < ch.streams.length) {
+    const h = state.streamHealth.get(ch.streams[next].url);
+    if (!h || h.ok || Date.now() - h.timestamp > FRESHNESS_MS) break;
+    next++;
+  }
 
   // Silently try up to 2 more streams before bothering the user.
   if (next < ch.streams.length && state.autoTries < 2) {
     state.autoTries += 1;
     state.streamIndex = next;
-    state.httpsRetried = false;
+    state.proxyRetried = false;
     playStream();
     return;
   }
 
   hideOverlay();
-  el.playerErrorText.textContent = `This stream couldn't be played (${err?.message || 'unknown error'}). ` +
-    (ch.streams.length > 1 ? 'Try another stream below, or copy the URL and open it in VLC.' : 'Try copying the URL and opening it in VLC.');
+  el.playerErrorText.textContent =
+    `This stream couldn't be played (${err?.message || 'unknown error'}). ` +
+    (ch.streams.length > 1
+      ? 'Try another stream below — different sources have different availability.'
+      : 'This stream may be temporarily unavailable. Try again later.');
   el.playerError.hidden = false;
   updateStreamListActive();
 }
@@ -508,7 +633,7 @@ function renderStreamList() {
     btn.addEventListener('click', () => {
       state.streamIndex = i;
       state.autoTries = 0;
-      state.httpsRetried = false;
+      state.proxyRetried = false;
       playStream();
     });
     el.streamList.appendChild(btn);
@@ -564,7 +689,7 @@ async function prefetchEpg() {
   for (const cc of top) {
     try {
       await fetchCountryEpg(cc);
-      render(); // reveal the new "Now:" lines
+      updateEpgLabels(); // in-place update — no full grid rebuild
     } catch {
       /* provider has no guide for this country — skip */
     }
@@ -679,12 +804,12 @@ el.retryStream.addEventListener('click', () => {
   if (state.current && state.streamIndex + 1 < state.current.streams.length) {
     state.streamIndex += 1;
     state.autoTries = 0;
-    state.httpsRetried = false;
+    state.proxyRetried = false;
     playStream();
   } else {
     state.streamIndex = 0;
     state.autoTries = 0;
-    state.httpsRetried = false;
+    state.proxyRetried = false;
     playStream();
   }
 });
